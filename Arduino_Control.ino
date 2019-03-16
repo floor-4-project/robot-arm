@@ -413,16 +413,17 @@ void armPositionControl(int state) {
   }
 }
 
-void isValidRuntime() {
+boolean isValidRuntime() {
   if (digitalRead(vexValidRuntime) == HIGH) {
     validRuntimeHigh = millis();
   } else {
     validRuntimeLow = millis();
   }
 
-  if (validRuntimeHigh > 1000 || validRuntimeLow > 1000) {
-    
+  if ((millis() - validRuntimeHigh) > 1000 || (millis() - validRuntimeLow) > 1000) {
+    return false;
   }
+  return true;
 }
 
 void debug() {
