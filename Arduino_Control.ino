@@ -10,9 +10,10 @@ const int vexLowerArmForward = 38;
 const int vexUpperArmForward = 36;
 const int vexTurntableForward = 34;
 
-const int vexState0 = 30;
-const int vexState1 = 28;
-const int vexState2 = 26;
+const int vexState0 = 28;
+const int vexState1 = 26;
+
+const int vexValidRuntime = 30;
 
 const int turntableSwitch = 22; 
 const int lowerArmSwitch = 23;
@@ -67,6 +68,8 @@ SetPositions setPositions = { 0, 0, 0, 0, 0 }; // Positions used during preset c
 
 boolean positionControl = false; // Boolean to track if we are using presets, or if we are doing manual control
 int timeDelay = 1; // Time delay for stepping, in milliseconds
+long validRuntimeHigh = 0;
+long validRuntimeLow = 0;
 
 void setup() {
   pinMode(vexClawOn, INPUT);
@@ -82,7 +85,8 @@ void setup() {
   
   pinMode(vexState0, INPUT);
   pinMode(vexState1, INPUT);
-  pinMode(vexState2, INPUT);
+
+  pinMode(vexValidRuntime, INPUT);
 
   pinMode(turntableSwitch, INPUT);
   pinMode(lowerArmSwitch, INPUT);
@@ -181,7 +185,6 @@ void sendReverseStep() {
 
 int readControlState() {
   boolean LSB; // Least Significant Bit
-  boolean CB; // Center Bit
   boolean MSB; // Most Significant Bit
   
   if (digitalRead(vexState0) == HIGH) {
@@ -191,23 +194,17 @@ int readControlState() {
   }
 
   if (digitalRead(vexState1) == HIGH) {
-    CB = true;
-  } else {
-    CB = false;
-  }
-
-  if (digitalRead(vexState2) == HIGH) {
     MSB = true;
   } else {
     MSB = false;
   }
 
-  if (!MSB && !CB && !LSB) { // State 0
+  if (!MSB && !LSB) { // State 0
     return 0;
-  } else if (!MSB && !CB && LSB) { // State 1
+  } else if (!MSB && LSB) { // State 1
     return 1;
-  } else if (!MSB && CB && !LSB) { // State 2
-    return 3;
+  } else if (MSB && !LSB) { // State 2
+    return 3; // Set to 3 for testing preset
   } else { // Error Condition - Unknown State
     Serial.print("Unknown Condition");
     return 0;
@@ -301,6 +298,26 @@ void manualControl() { // INVERT MOTOR DIRECTIONS IN HERE
   }
 }
 
+void zeroArm() {
+  while (digitalRead(turntableSwitch) == LOW) {
+    sendMotor(TURNTABLE);
+    sendForwardStep();
+  }
+  steps.turntable = 0;
+
+  while (digitalRead(lowerArmSwitch) == LOW) {
+    sendMotor(LOWER_ARM);
+    sendForwardStep();
+  }
+  steps.lowerArm = 0;
+
+  while (digitalRead(upperArmSwitch) == LOW) {
+    sendMotor(UPPER_ARM);
+    sendForwardStep();
+  }
+  steps.upperArm = 0;
+}
+
 void armPositionControl(int state) {
   switch(state) {
     case 0:
@@ -323,13 +340,16 @@ void armPositionControl(int state) {
       setPositions.clawRotate = state2.CLAW_ROTATE;
       setPositions.claw = state2.CLAW;
       break;
-    case 3:
+    case 3: // Move arm to display position
       positionControl = true;
       setPositions.turntable = start.TURNTABLE;
       setPositions.lowerArm = start.LOWER_ARM;
       setPositions.upperArm = start.UPPER_ARM;
       setPositions.clawRotate = start.CLAW_ROTATE;
       setPositions.claw = start.CLAW;
+      break;
+    case 4: // Move arm to home position
+      zeroArm();
       break;
   }
 
@@ -393,24 +413,17 @@ void armPositionControl(int state) {
   }
 }
 
-void zeroArm() {
-  while (digitalRead(turntableSwitch) == LOW) {
-    sendMotor(TURNTABLE);
-    sendForwardStep();
+boolean isValidRuntime() {
+  if (digitalRead(vexValidRuntime) == HIGH) {
+    validRuntimeHigh = millis();
+  } else {
+    validRuntimeLow = millis();
   }
-  steps.turntable = 0;
 
-  while (digitalRead(lowerArmSwitch) == LOW) {
-    sendMotor(LOWER_ARM);
-    sendForwardStep();
+  if ((millis() - validRuntimeHigh) > 1000 || (millis() - validRuntimeLow) > 1000) {
+    return false;
   }
-  steps.lowerArm = 0;
-
-  while (digitalRead(upperArmSwitch) == LOW) {
-    sendMotor(UPPER_ARM);
-    sendForwardStep();
-  }
-  steps.upperArm = 0;
+  return true;
 }
 
 void debug() {
@@ -428,5 +441,9 @@ void loop() {
    * Motor Direction (Forward/Reverse)
    * State Control (000, 001, 010)
    */
-  armPositionControl(readControlState());
+  if (isValidRuntime()) {
+    armPositionControl(readControlState());
+  } else {
+    armPositionControl(4); // Resets the arm to home position if the VEX PIC disconnects
+  }
 }
